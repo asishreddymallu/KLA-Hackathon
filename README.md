@@ -1,8 +1,15 @@
-# KLA HAT Grayscale Super-Resolution Submission
+# KLA HAT Grayscale Super-Resolution
 
-This folder is the minimal submission version derived from the KLA grayscale HAT Colab notebook and matched to the supplied `best.pth` checkpoint.
+This is the submission-ready split of the original `KLA_HAT_Grayscale_Finetune.ipynb`.
 
-## Files
+The notebook combined training and test inference in one Colab workflow. Here they are separated into:
+
+- `train.py` — training, validation, checkpoint saving, and resume support.
+- `evaluate.py` — inference using a trained checkpoint.
+
+The submission does **not** require Google Drive. All paths are local or supplied through command-line arguments.
+
+## Project structure
 
 ```text
 KLA_HAT_FINAL_MINIMAL/
@@ -14,130 +21,168 @@ KLA_HAT_FINAL_MINIMAL/
     └── best.pth
 ```
 
-The supplied checkpoint is the original full PyTorch checkpoint produced by the notebook. Its learned network parameters are stored under `checkpoint["model"]`.
+`test_predictions/` is created automatically by `evaluate.py`.
+
+For training, the dataset should be arranged as:
+
+```text
+project/
+├── train/
+│   ├── GT/
+│   │   ├── image1.npy
+│   │   ├── image2.npy
+│   │   └── ...
+│   └── NoisyLR/
+│       ├── image1.npy
+│       ├── image2.npy
+│       └── ...
+└── checkpoints/
+```
+
+Each GT/LQ pair must have the same filename stem. The training code expects a 2× relationship, for example:
+
+```text
+GT       : 256 × 256
+NoisyLR  : 128 × 128
+```
+
+The arrays are grayscale `.npy` files.
 
 ## Model
 
+The model is the grayscale ×2 HAT configuration used in the original notebook:
+
 - HAT (Hybrid Attention Transformer)
-- Grayscale input: 1 channel
-- Grayscale output: 1 channel
-- Scale: 2×
-- embed_dim: 64
-- depths: (4, 4, 4, 4)
-- num_heads: (4, 4, 4, 4)
-- window_size: 8
-- patch size: 1
-- upsampler: pixelshuffle
-- residual connection: 1conv
+- 1 input channel
+- 1 output channel
+- 2× super-resolution
+- `embed_dim=64`
+- `depths=(4, 4, 4, 4)`
+- `num_heads=(4, 4, 4, 4)`
+- `window_size=8`
+- `patch_size=1`
+- PixelShuffle upsampler
+- `1conv` residual connection
 - L1 loss
-- AdamW, learning rate 2e-4
-- CosineAnnealingLR
+- AdamW
+- Initial learning rate: `2e-4`
+- Cosine annealing learning-rate schedule
 - AMP
-- gradient clipping: 1.0
-- train/validation split: 90/10
-- split seed: 42
-- target total epochs: 60
+- Gradient clipping: `1.0`
+- 90/10 train/validation split
+- Split seed: `42`
+- Training crop: `128 × 128` GT / `64 × 64` LR
+- Default total epochs: `100`
+- Default batch size: `4`
 
-## Google Drive layout
+## Training
 
-The training scripts expect:
+Install the Python dependencies:
 
-```text
-My Drive/
-└── KLA_HAT/
-    ├── train/
-    │   ├── GT/
-    │   └── NoisyLR/
-    ├── Test_NoisyLR/
-    └── checkpoints/
-        ├── best.pth
-        └── latest.pth   # generated after/resume training
+```bash
+pip install -r requirements.txt
 ```
 
-The checkpoint included in this submission is:
+Then place the training dataset in:
 
 ```text
-checkpoints/best.pth
+train/GT/
+train/NoisyLR/
 ```
-
-## Colab training
-
-Upload `train.py`, `requirements.txt`, and the `checkpoints` folder to Colab. Your Drive dataset remains under `/content/drive/MyDrive/KLA_HAT`.
 
 Run:
 
 ```bash
-pip install -r requirements.txt
 python train.py
 ```
 
-`train.py` is configured for 60 total epochs. It resumes from `checkpoints/latest.pth` when that file exists; otherwise it can resume from `checkpoints/best.pth`. With the supplied checkpoint, the stored epoch is 56, so the next training epoch is 57.
+The script uses a local project root by default.
 
-To force a fresh model:
+To specify a different project/data root:
+
+```bash
+python train.py --project /path/to/project
+```
+
+The script creates:
+
+```text
+checkpoints/latest.pth
+checkpoints/best.pth
+```
+
+When `latest.pth` exists, training resumes from it. If `latest.pth` is not present but `best.pth` exists, the script can resume from `best.pth`.
+
+To force a fresh run:
 
 ```bash
 python train.py --no-resume
 ```
 
-## Evaluation
+The training script requires an NVIDIA GPU with CUDA.
 
-Run:
+## Inference / evaluation
 
-```bash
-python evaluate.py
-```
+The included `checkpoints/best.pth` is the trained checkpoint from the original notebook.
 
-By default it loads:
-
-```text
-/content/drive/MyDrive/KLA_HAT/checkpoints/best.pth
-```
-
-and reads:
-
-```text
-/content/drive/MyDrive/KLA_HAT/Test_NoisyLR/*.npy
-```
-
-Restored outputs are written to:
-
-```text
-/content/drive/MyDrive/KLA_HAT/test_predictions/*.npy
-```
-
-To save PNG previews as well:
-
-```bash
-python evaluate.py --save-png
-```
-
-## Important checkpoint detail
-
-`best.pth` is a full PyTorch training checkpoint, not a plain state dictionary. It contains keys such as:
-
-```text
-model
-optimizer
-scheduler
-scaler
-epoch
-best_psnr
-history
-```
-
-The actual learned HAT weights are in:
+The checkpoint is a full PyTorch training checkpoint. The learned HAT parameters are stored under:
 
 ```python
 checkpoint["model"]
 ```
 
-## Supplied checkpoint information
+Place test `.npy` files in:
 
-The provided `best.pth` records:
+```text
+Test_NoisyLR/
+```
 
-- epoch: 56
-- best validation PSNR: 28.08259262918413 dB
-- model tensors: 412
-- trainable parameter values stored: 1,467,265
+Then run:
 
-No benchmark values beyond those stored in the checkpoint should be inferred from this package.
+```bash
+python evaluate.py
+```
+
+The restored 2× grayscale outputs are written to:
+
+```text
+test_predictions/
+```
+
+Each output is saved as `.npy` with the same filename as its input.
+
+To also generate 8-bit grayscale PNG previews:
+
+```bash
+python evaluate.py --save-png
+```
+
+You can also supply paths explicitly:
+
+```bash
+python evaluate.py \
+    --checkpoint checkpoints/best.pth \
+    --test-dir /path/to/Test_NoisyLR \
+    --output-dir /path/to/test_predictions
+```
+
+## Supplied checkpoint
+
+The included checkpoint records:
+
+```text
+epoch: 56
+best validation PSNR: 28.08259262918413 dB
+model tensors: 412
+trainable parameter values: 1,467,265
+```
+
+The checkpoint's `epoch=56` is the zero-based epoch index stored by the training loop.
+
+## Notes
+
+`train.py` and `evaluate.py` automatically clone the official HAT repository when it is not already available locally, then install the HAT/BasicSR dependencies.
+
+The scripts also apply the BasicSR `rgb_to_grayscale` import compatibility patch used in the original notebook.
+
+The original notebook is not required to run inference. The included `best.pth` is sufficient for evaluation.
